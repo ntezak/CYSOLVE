@@ -1,0 +1,7 @@
+*.so
+*.pyc
+*.npz
+*.pickle
+cysolve/ode.c
+cysolve/callback.c
+
