@@ -1,3 +1,4 @@
+# cython: profile=True
 
 cimport cython
 from cython cimport view
