@@ -1,6 +1,4 @@
 
-# cython: profile=True
-
 cimport numpy as np
 import numpy as np
 
@@ -14,7 +12,7 @@ cdef inline void copy_array(double * from_p, double * to_p, int Np) nogil:
     for kk in range(Np):
         to_p[kk] = from_p[kk]
 
-cdef int c_integrate_ode(double tf, int N, int dim, double y0[], double * Y, int (*ode)(double, double [], double [], void *) nogil, void * params, double t0=*)
+cdef int c_integrate_ode(double tf, int N, int dim, double y0[], double * Y, int (*ode)(double, double [], double [], void *) nogil, void * params, double t0=*) nogil
 
 cdef np.ndarray c_eval_ode(double t, np.ndarray[np.float64_t, ndim=1] y, void * params, int dim, int (*ode)(double, double [], double [], void *))
 

@@ -1,5 +1,4 @@
 
-# cython: profile=True
 
 cimport cython
 import numpy as np
@@ -18,7 +17,7 @@ from cython.parallel cimport prange
 
 @cython.cdivision(True)
 @cython.boundscheck(False)
-cdef int c_integrate_ode(double tf, int N, int dim, double y0[], double * Y, int (*ode)(double, double [], double [], void *) nogil, void * params, double t0 = 0.):
+cdef int c_integrate_ode(double tf, int N, int dim, double y0[], double * Y, int (*ode)(double, double [], double [], void *) nogil, void * params, double t0 = 0.) nogil:
     """
     Solve the ODE given by ode, with dimension dim, parametrized by params, in a given time interval [t0, tf] for an initial condition y0 and compute the state at N steps.
     The result is stored in the array Y as [y_1[t0] ... y_dim[t0], y_2[t0 + dt], ..., y_dim[t0+dt],...].
