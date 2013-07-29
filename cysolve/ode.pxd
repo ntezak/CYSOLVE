@@ -24,9 +24,18 @@ cdef class ODE:
     cdef public double t
     cdef public np.ndarray y
     cdef int free_params_on_dealloc
-    
     cpdef np.ndarray integrate(self, double delta_t, int N, int include_initial=*, int update_state=*)
     cpdef np.ndarray evaluate(self)
-    
 
+cdef class ODEs:
     
+    cdef int (*c_ode)(double, double [], double [], void *) nogil
+    cdef void * c_params
+    cdef int param_size
+    cdef int N_params
+    cdef public int dim
+    cdef public double t
+    cdef public np.ndarray y
+    cdef int free_params_on_dealloc
+    cpdef object integrate(self, double delta_t, int N, int include_initial=*, int update_state=*)
+    cpdef np.ndarray evaluate(self)

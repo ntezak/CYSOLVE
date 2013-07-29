@@ -84,6 +84,7 @@ cdef class ODE:
         cdef double[::1] YView
         cdef double[::1] yview = self.y
         cdef np.ndarray Y
+        cdef int success
         
         if include_initial:
             Y = np.zeros((N + 1, self.dim))
@@ -104,6 +105,82 @@ cdef class ODE:
             
     cpdef np.ndarray evaluate(self):
         return c_eval_ode(self.t, self.y, self.c_params, self.dim, self.c_ode)
+        
+    def __dealloc__(self):
+        if self.free_params_on_dealloc:
+            free(self.c_params)
+
+            
+cdef class ODEs:
+
+    def __cinit__(self):
+        self.free_params_on_dealloc = 0
+        
+    @cython.boundscheck(False)
+    cpdef object integrate(self, double delta_t, int N, int include_initial=0, int update_state=1):
+
+        cdef double[::1] YView
+        cdef double[:,::1] yview = self.y
+        cdef np.ndarray Y
+        cdef int traj_index
+        cdef int strd
+        
+#        if include_initial:
+#            Y = np.zeros((self.N_params, N + 1, self.dim))
+#            Y[:,0,:] = self.y
+#        else:
+        Y = np.zeros((self.N_params, N, self.dim))
+        strd = N * self.dim
+        
+        YView = Y.ravel()
+        cdef:
+            double t = self.t
+            int (*c_ode)(double, double [], double [], void *) nogil
+            void * c_params = self.c_params
+            int param_size = self.param_size
+            int dim = self.dim
+            np.ndarray success = np.zeros(self.N_params, dtype=int)
+            int[:] successview = success
+            
+        c_ode = self.c_ode
+            
+        for traj_index in prange(self.N_params, nogil=True):
+            successview[traj_index] = c_integrate_ode(t + delta_t, N, dim, <double*>&yview[traj_index,0], <double*>&YView[traj_index * strd], c_ode, c_params + param_size * traj_index, t)
+        
+        if update_state:
+            self.y[success == GSL_SUCCESS] = Y[success == GSL_SUCCESS,-1, :]
+            self.t += delta_t
+            
+        if include_initial:
+            Y = np.concatenate((self.y.reshape(self.N_params, 1, -1), Y), axis=1)
+
+        return Y, success
+    
+    @cython.boundscheck(False)
+    cpdef np.ndarray evaluate(self):
+
+        cdef double[::1] YView
+        cdef double[:,::1] yview = self.y
+        cdef np.ndarray Y
+        cdef int traj_index
+        
+        Y = np.zeros((self.N_params, self.dim))
+        
+        YView = Y.ravel()
+        cdef:
+            double t = self.t
+            int (*c_ode)(double, double [], double [], void *) nogil
+            void * c_params = self.c_params
+            int param_size = self.param_size
+            int dim = self.dim
+        
+        c_ode = self.c_ode
+
+            
+        for traj_index in prange(self.N_params, nogil=True):
+            c_ode(t, <double*>&yview[traj_index,0], <double*>&YView[traj_index * dim], c_params + param_size * traj_index)
+        
+        return Y
         
     def __dealloc__(self):
         if self.free_params_on_dealloc:
