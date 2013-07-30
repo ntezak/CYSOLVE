@@ -1,8 +1,9 @@
 
 
 cimport cython
-import numpy as np
 cimport numpy as np
+import numpy as np
+
 
 from cython_gsl cimport (gsl_matrix_view, gsl_matrix_view_array, gsl_matrix, gsl_matrix_set, gsl_odeiv2_system,
                             GSL_SUCCESS, gsl_odeiv2_driver, gsl_odeiv2_driver_alloc_y_new, gsl_odeiv2_driver_apply,
@@ -140,7 +141,7 @@ cdef class ODEs:
             int param_size = self.param_size
             int dim = self.dim
             np.ndarray success = np.zeros(self.N_params, dtype=int)
-            int[:] successview = success
+            long[:] successview = success
             
         c_ode = self.c_ode
             
