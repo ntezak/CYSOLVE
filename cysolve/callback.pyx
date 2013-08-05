@@ -19,6 +19,7 @@ cdef struct CINFO:
 cdef view.array yview
 
 @cython.boundscheck(False)
+@cython.wraparound(False)
 cdef int _callback_c_ode(double t, double y[], double f[], void * cinfo) nogil:
     cdef CINFO p  = (<CINFO *> cinfo)[0]
     cdef double[::1] retV
@@ -63,4 +64,3 @@ cdef class ODECallback(ODE):
         self.c_params = <void*> &self.cinfo
         
         
-
