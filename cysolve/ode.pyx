@@ -1,19 +1,19 @@
 #cython: embedsignature=True
 
 cimport cython
+import numpy
+
 cimport numpy as np
 import numpy as np
 
-
-from cython_gsl cimport (gsl_matrix_view, gsl_matrix_view_array, gsl_matrix, gsl_matrix_set, gsl_odeiv2_system,
-                            GSL_SUCCESS, gsl_odeiv2_driver, gsl_odeiv2_driver_alloc_y_new, gsl_odeiv2_driver_apply,
-                            gsl_odeiv2_driver_free, gsl_odeiv2_step_rk8pd, gsl_odeiv2_driver_apply_fixed_step,
-                            gsl_matrix_alloc, gsl_matrix_free
-                            )
-
+from cython_gsl cimport (
+    gsl_odeiv2_system, GSL_SUCCESS, gsl_odeiv2_driver, gsl_odeiv2_driver_alloc_y_new, gsl_odeiv2_driver_apply,
+    gsl_odeiv2_driver_free, gsl_odeiv2_step_rk8pd, gsl_odeiv2_driver_apply_fixed_step
+)
 from libc.math cimport floor as mfloor, lround as mlround, sqrt, sin, cos
 from libc.stdlib cimport malloc, free
 from cython.parallel cimport prange
+from cpython cimport PyObject
 
 
 @cython.cdivision(True)
@@ -74,19 +74,20 @@ cdef int c_ode_steady_state(double T_max, double tol, int dim, double y0[], doub
     """
     Integrate an ode until either T_max or the ODE converges ||\dot{y}||^2/||y||^2 < tol. The result is stored in yss.
     """
+    
+    # set up GSL ode system
     cdef gsl_odeiv2_system sys
     sys.function = ode
     sys.dimension = dim
     sys.params = params
     
-
+    # set up driver
     cdef gsl_odeiv2_driver * d
     d = gsl_odeiv2_driver_alloc_y_new(
             &sys, gsl_odeiv2_step_rk8pd,
             1e-6, 1e-6, 0.0)
     
 
-    
     cdef int kk, ll
     cdef double t
     cdef double * y = <double *> malloc(dim * sizeof(double))
@@ -101,8 +102,9 @@ cdef int c_ode_steady_state(double T_max, double tol, int dim, double y0[], doub
     cdef int steps = imax(100, <int>(T_max/.1))
     cdef double tkk, fn, yn
 
-    
+    # integrate till T_max or convergence
     for kk in range(steps):
+        
         tkk = (kk + 1) * T_max / steps
         status = gsl_odeiv2_driver_apply (d, &t, tkk, y)
         
@@ -116,10 +118,12 @@ cdef int c_ode_steady_state(double T_max, double tol, int dim, double y0[], doub
         if (status != GSL_SUCCESS):
             status = 23
             break
-
+        
+        # compute squared norms of f=\dot{y} and y
         fn = normsq(f, dim, 1)
         yn = normsq(y, dim, 1)
         
+        # if ratio of norms < tol, converged!
         if sqrt(fn/yn) < tol:
             converged = 1
             status = GSL_SUCCESS
@@ -147,7 +151,16 @@ cdef np.ndarray c_eval_ode(double t, np.ndarray[np.float64_t, ndim=1] y, void * 
     ode(t, <double *> &yView[0], <double *> &retView[0], params)
     return ret
     
+    
+cdef int _c_ode_ODE(double t, double * y, double * f, void * params) nogil:
+    """
+    Wrap the ODE.ode function in a suitable way to be passed to c_integrate_ode.
+    """
+    return (<ODE>(<PyObject *> params)[0]).c_ode(t, y, f)
+
+
 cdef class ODE:
+    
     """
     Convenience class to set up a single ODE in an object-oriented fashion.
 
@@ -155,27 +168,24 @@ cdef class ODE:
     The current time is stored in self.t
     """
     
-#    def __cinit__(self):
-#        self.free_params_on_dealloc = 0
-#        self.context = dict()
-
     cpdef np.ndarray integrate(self, double delta_t, int N, int include_initial=0, int update_state=1):
 
         cdef double[::1] YView
         cdef double[::1] yview = self.y
         cdef np.ndarray Y
         cdef int success
-        
-        if include_initial:
-            Y = np.zeros((N + 1, self.dim))
-            Y[0] = self.y
-        else:
-            Y = np.zeros((N, self.dim))
+                
+        Y = np.zeros((N, self.dim))
             
-        YView = Y[-N:].ravel()
-        success = c_integrate_ode(self.t + delta_t, N, self.dim, <double*>&yview[0], <double*>&YView[0], self.c_ode, self.c_params, self.t)
+        YView = Y.ravel()
+        success = c_integrate_ode(self.t + delta_t, N, self.dim, <double*>&yview[0], <double*>&YView[0], _c_ode_ODE, <void *>self, self.t)
         
         if success == GSL_SUCCESS:
+            
+            if include_initial:
+                Y = np.vstack((np.zeros((1, self.dim)), Y))
+                Y[0] = self.y
+                
             if update_state:
                 self.y = Y[-1]
                 self.t += delta_t
@@ -184,21 +194,27 @@ cdef class ODE:
             raise Exception('Execution error')
     
     cpdef np.ndarray steady_state(self, double T_max, double tol):
+        
         cdef double[::1] yview = self.y
         cdef np.ndarray yss = np.zeros_like(self.y)
         cdef double[::1] yssview = yss
-        cdef int success = c_ode_steady_state(T_max, tol, self.dim, <double*>&yview[0], <double*>&yssview[0], self.c_ode, self.c_params)
+        cdef int success = c_ode_steady_state(T_max, tol, self.dim, <double*>&yview[0], <double*>&yssview[0], _c_ode_ODE, <void *>self.c_params)
+        
         if success == GSL_SUCCESS:
             return yss
         else:
             raise Exception("Execution error: {:d}".format(success))
     
     cpdef np.ndarray evaluate(self):
-        return c_eval_ode(self.t, self.y, self.c_params, self.dim, self.c_ode)
+        return c_eval_ode(self.t, self.y, <void*>self, self.dim, _c_ode_ODE)
+    
+    
+    cdef int c_ode(ODE self, double t, double * y, double * f) nogil:
+        """
+        Overwrite this in a concrete subclass!!
+        """
+        return GSL_SUCCESS
         
-#    def __dealloc__(self):
-#        if self.free_params_on_dealloc and self.c_params != NULL:
-#            free(self.c_params)
 
             
 cdef class ODEs:
@@ -207,10 +223,12 @@ cdef class ODEs:
     (but can differ in current state and ode parameters) in an object-oriented fashion.
     """
     
-
-#    def __cinit__(self):
-#        self.free_params_on_dealloc = 0
-#        self.context = dict()
+    def __init__(self, odes):
+        self.odes = np.array(odes)
+        self.dim = odes[0].dim
+        if not (np.array([o.dim for o in odes]) == self.dim).all():
+            raise ValueError("All odes need to have the same state space dimension.")
+    
         
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -226,36 +244,30 @@ cdef class ODEs:
         cdef double[:,::1] yview = self.y
         cdef np.ndarray Y
         cdef int traj_index
-        cdef int strd
+        cdef long[::1] odes = self.odes
+        cdef int N_odes = self.odes.shape[0]
         
-#        if include_initial:
-#            Y = np.zeros((self.N_params, N + 1, self.dim))
-#            Y[:,0,:] = self.y
-#        else:
-        Y = np.zeros((self.N_params, N, self.dim))
-        strd = N * self.dim
+        Y = np.zeros((N_odes, N, self.dim))
+
         
         YView = Y.ravel()
-        cdef:
-            double t = self.t
-            int (*c_ode)(double, double [], double [], void *) nogil
-            void * c_params = self.c_params
-            int param_size = self.param_size
-            int dim = self.dim
-            np.ndarray success = np.zeros(self.N_params, dtype=int)
-            long[:] successview = success
-            
-        c_ode = self.c_ode
-            
-        for traj_index in prange(self.N_params, nogil=True):
-            successview[traj_index] = c_integrate_ode(t + delta_t, N, dim, <double*>&yview[traj_index,0], <double*>&YView[traj_index * strd], c_ode, c_params + param_size * traj_index, t)
         
-        if update_state:
-            self.y[success == GSL_SUCCESS] = Y[success == GSL_SUCCESS,-1, :]
-            self.t += delta_t
+        cdef:
+            np.ndarray success = np.zeros(self.N_odes, dtype=int)
+            long[:] successview = success
+            int current_index
+            int strd = N * self.dim
+            double t
             
+        for current_index in prange(N_odes, nogil=True):
+            t = (<ODE>(<PyObject *>odes[current_index])).t
+            successview[traj_index] = c_integrate_ode(t + delta_t, N, self.dim, <double*>&yview[current_index,0], <double*>&YView[current_index * strd], _c_ode_ODE, <void*>odes[current_index], t)
+        
         if include_initial:
-            Y = np.concatenate((self.y.reshape(self.N_params, 1, -1), Y), axis=1)
+            Y = np.concatenate((self.y.reshape(N_odes, 1, -1), Y), axis=1)
+
+        if update_state:
+            pass
 
         return Y, success
 
@@ -271,19 +283,21 @@ cdef class ODEs:
         
         cdef:
             double[:, ::1] yview = self.y
+            
             np.ndarray yss = np.zeros_like(self.y)
             double[:, ::1] yssview = yss
-            int (*c_ode)(double, double [], double [], void *) nogil
-            void * c_params = self.c_params
-            int param_size = self.param_size
-            int dim = self.dim
+            
+            long[::1] odes = self.odes
+            int N_odes = self.odes.shape[0]
+            
             np.ndarray success = np.zeros(self.N_params, dtype=int)
             long[:] successview = success
-            int traj_index
             
-        c_ode = self.c_ode
-        for traj_index in prange(self.N_params, nogil=True):
-            successview[traj_index] = c_ode_steady_state(T_max, tol, dim, <double*>&yview[traj_index, 0], <double*>&yssview[traj_index, 0], c_ode, c_params + param_size * traj_index)
+            int current_index
+            
+        
+        for current_index in prange(N_odes, nogil=True):
+            successview[current_index] = c_ode_steady_state(T_max, tol, self.dim, <double*>&yview[current_index, 0], <double*>&yssview[current_index, 0], _c_ode_ODE, <void*>odes[current_index])
         
         return yss, success
     
@@ -294,30 +308,14 @@ cdef class ODEs:
         Evaluate all ODEs given the current states at the current time and return \dot{y}=f(y,t).
         """
 
-        cdef double[::1] YView
+        cdef int N_odes = self.odes.shape[0]
+        cdef np.ndarray Y = np.zeros((N_odes, self.dim))
+        cdef double[::1] YView = Y.ravel()
         cdef double[:,::1] yview = self.y
-        cdef np.ndarray Y
-        cdef int traj_index
-        
-        Y = np.zeros((self.N_params, self.dim))
-        
-        YView = Y.ravel()
-        cdef:
-            double t = self.t
-            int (*c_ode)(double, double [], double [], void *) nogil
-            void * c_params = self.c_params
-            int param_size = self.param_size
-            int dim = self.dim
-        
-        c_ode = self.c_ode
-
+        cdef long[::1] odes = self.odes
+        cdef int current_index
             
-        for traj_index in prange(self.N_params, nogil=True):
-            c_ode(t, <double*>&yview[traj_index,0], <double*>&YView[traj_index * dim], c_params + param_size * traj_index)
-        
+        for current_index in prange(N_odes, nogil=True):
+            c_ode(current_ode.t, <double*>&yview[current_index,0], <double*>&YView[current_index * self.dim], <void*>odes[current_index])
         return Y
-        
-#    def __dealloc__(self):
-#        if self.free_params_on_dealloc and self.c_params != NULL:
-#            free(self.c_params)
         
