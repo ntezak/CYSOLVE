@@ -13,14 +13,6 @@ ext_modules = [
               extra_compile_args=['-fopenmp'],
               extra_link_args=['-fopenmp']
               ),
-    Extension("cysolve.callback",
-              ["cysolve/callback.pyx"],
-              include_dirs=[np.get_include()],
-              libraries=cython_gsl.get_libraries(),
-#              extra_compile_args=['-fopenmp'],
-#              extra_link_args=['-fopenmp']
-              ),
-
 ]
 
 setup(
