@@ -7,7 +7,7 @@ import cython_gsl
 
 ext_modules = [
     Extension("cysolve.ode",
-              ["cysolve/ode.pyx"],
+              ["cysolve/src/ode.pyx"],
               include_dirs=[np.get_include()],
               libraries=cython_gsl.get_libraries(),
               extra_compile_args=['-fopenmp'],
