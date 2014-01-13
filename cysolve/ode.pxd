@@ -79,9 +79,9 @@ cdef void sample_gaussian(gsl_rng * r, double sigma, double * w, Py_ssize_t m) n
 
 cdef int c_integrate_ode(double tf, Py_ssize_t N, Py_ssize_t dim, double y0[], double * Y, ode_t ode, void * params, double t0=*) nogil
 
-cdef int c_integrate_sde(double tf, double h, Py_ssize_t N, Py_ssize_t dim, Py_ssize_t m, double y0[], double * Y, ode_t ode, noise_t noise_coeff, void *params, double t0=*) nogil
+cdef int c_integrate_sde(double tf, double h, Py_ssize_t N, Py_ssize_t dim, Py_ssize_t m, double y0[], double * Y, ode_t ode, noise_t noise_coeff, void *params, double t0=*, long rngseed=*) nogil
 
-cdef int c_integrate_sde_store_noises(double tf, double h, Py_ssize_t N, Py_ssize_t dim, Py_ssize_t m, double * y0,  double * Y, double * W, double * B, ode_t ode, noise_t noise_coeff, void *params, double t0=*) nogil
+cdef int c_integrate_sde_store_noises(double tf, double h, Py_ssize_t N, Py_ssize_t dim, Py_ssize_t m, double * y0,  double * Y, double * W, double * B, ode_t ode, noise_t noise_coeff, void *params, double t0=*, long rngseed=*) nogil
 
 cdef int c_ode_steady_state(double T_max, double tol, Py_ssize_t dim, double y0[], double * yss, ode_t ode, void * params) nogil
 
@@ -115,6 +115,6 @@ cdef class ODEs:
 cdef class SDEs(ODEs):
     cdef noise_t c_noise_coeff
     cdef public Py_ssize_t N_noises
-    cpdef object integrate_sde(self, double delta_t, double h, Py_ssize_t N, int include_initial=*, int update_state=*, int return_noises=*)
+    cpdef object integrate_sde(self, double delta_t, double h, Py_ssize_t N, int include_initial=*, int update_state=*, int return_noises=*, np.ndarray rngseeds=*)
     cpdef np.ndarray sample_noise(self)
 
